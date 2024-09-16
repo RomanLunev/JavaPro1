@@ -2,9 +2,9 @@ import annotation.AfterSuite;
 import annotation.BeforeSuite;
 import annotation.Test;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
@@ -14,69 +14,54 @@ public class TestRunner {
         runTests(Animal.class);
     }
 
-    public static void runTests(Class c){
-        Method beforeSuite = checkOnlyOneMethodAnnotation(c, BeforeSuite.class);
-        Method afterSuite = checkOnlyOneMethodAnnotation(c, AfterSuite.class);
-        invokeStatic(c, beforeSuite);
-        processTests(c);
-        invokeStatic(c, afterSuite);
-
-    }
-
-    private static void processTests(Class clazz){
-        List<Method> methods =
-        Arrays.stream(clazz.getDeclaredMethods())
-                .filter(m->m.isAnnotationPresent(Test.class))
-                .sorted(Comparator.comparing(m->m.getDeclaredAnnotation(Test.class).priority(), Comparator.reverseOrder()))
-                .toList();
-
-        for (Method method : methods) {
-            System.out.println("----------------------");
-            if ((method.getModifiers() & Modifier.STATIC) != 0) {
-                System.out.println(method.getName() + " is static. Skipping test.");
-                continue;
-            }
-
-            int priority = method.getAnnotation(Test.class).priority();
-            if (priority < 0 || priority > 10) {
-                System.out.println(method.getName() + " has wrong priority." + priority + " Skipping test.");
-                continue;
-            }
-
-
-            method.setAccessible(true);
-            try {
-                System.out.println("Invoke " + method.getName());
-                method.invoke(clazz.getDeclaredConstructor().newInstance());
-            } catch (Exception e) {
-                System.out.println("Test " + method.getName() + " failed");
-            }
-        }
-    }
-
-    private static Method checkOnlyOneMethodAnnotation(Class clazz, Class annotationClass){
-        Method method = null;
-        int found = 0;
-        Method[] methods = clazz.getDeclaredMethods();
+    private static void runTests(Class c){
+        Method methodBeforeSuite = null;
+        Method methodAfterSuite = null;
+        Method[] methods = c.getDeclaredMethods();
+        List<Method>  testMethodList = new ArrayList<>();
         for (Method m : methods) {
-            if (m.isAnnotationPresent(annotationClass)) {
-
+            if (m.isAnnotationPresent(BeforeSuite.class)) {
                 if ((m.getModifiers() & Modifier.STATIC) == 0) {
                     throw new RuntimeException(m.getName() + " is not static");
                 }
-
-                found++;
-                if (found > 1) {
-                    throw new RuntimeException(clazz.toString() + " has more than one " + annotationClass.toString());
+                if (methodBeforeSuite != null) {
+                    throw new RuntimeException(c.toString() + " has more than one BeforeSuite");
                 }
-                method = m;
+                methodBeforeSuite = m;
+            } else if (m.isAnnotationPresent(AfterSuite.class)) {
+                if ((m.getModifiers() & Modifier.STATIC) == 0) {
+                    throw new RuntimeException(m.getName() + " is not static");
+                }
+                if (methodAfterSuite != null) {
+                    throw new RuntimeException(c.toString() + " has more than one AfterSuite");
+                }
+                methodAfterSuite = m;
+            } else if (m.isAnnotationPresent(Test.class)) {
+                if ((m.getModifiers() & Modifier.STATIC) != 0) {
+                    System.out.println(m.getName() + " is static. Skipping test.");
+                    continue;
+                }
+                int priority = m.getAnnotation(Test.class).priority();
+                if (priority < 0 || priority > 10) {
+                    System.out.println(m.getName() + " has wrong priority." + priority + " Skipping test.");
+                    continue;
+                }
+                testMethodList.add(m);
             }
         }
-        return method;
+        System.out.println("------------Tests----------");
+        invokeStatic(c, methodBeforeSuite);
+        processTests(c, testMethodList);
+        invokeStatic(c, methodAfterSuite);
+
+        List<Method> testMethodListSorted =
+                testMethodList.stream()
+                        .sorted(Comparator.comparing(t->t.getDeclaredAnnotation(Test.class).priority(), Comparator.reverseOrder()))
+                        .toList();
+
     }
 
     static void invokeStatic(Class clazz, Method method) {
-        System.out.println("----------------------");
         if (method == null) return;
         method.setAccessible(true);
         try {
@@ -87,4 +72,20 @@ public class TestRunner {
             throw new RuntimeException("Can not invoke " + method.getName() + " Tests failed! " + e.getMessage());
         }
     }
+
+    private static void processTests(Class clazz, List<Method> methods){
+        List<Method> methodsSortred = methods.stream()
+                .sorted(Comparator.comparing(m->m.getDeclaredAnnotation(Test.class).priority(), Comparator.reverseOrder()))
+                .toList();
+        for (Method method : methodsSortred) {
+            method.setAccessible(true);
+            try {
+                System.out.println("Invoke " + method.getName());
+                method.invoke(clazz.getDeclaredConstructor().newInstance());
+            } catch (Exception e) {
+                System.out.println("Test " + method.getName() + " failed");
+            }
+        }
+    }
+
 }
